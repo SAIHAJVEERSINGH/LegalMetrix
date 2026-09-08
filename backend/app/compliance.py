@@ -35,11 +35,19 @@ def find_field(data, *names):
 
 def looks_like_price(value: str) -> bool:
     """
-    Preserve the current conservative MRP behavior.
+    Validate a price value conservatively.
 
-    We deliberately do not change this validator in the final
-    backend pass because OCR/Groq may omit the currency marker.
-    A clearer image can legitimately resolve that situation.
+    MRP is already identified by the AI extraction field, so the
+    validator must not require a currency symbol to be present.
+    OCR commonly extracts:
+        ₹299
+        Rs. 299
+        INR 299
+        MRP 299
+        299.00
+
+    The field context remains important: this validator is used
+    for the extracted MRP field, not arbitrary OCR text.
     """
 
     if value is None:
@@ -50,25 +58,28 @@ def looks_like_price(value: str) -> bool:
     if not text:
         return False
 
-    currency_markers = [
-        "₹",
-        "rs",
-        "rs.",
-        "inr",
-        "rupees",
-    ]
-
-    has_currency = any(
-        marker in text
-        for marker in currency_markers
+    # Remove common price labels/currency markers.
+    cleaned = re.sub(
+        r"\b(?:mrp|max(?:imum)?\s+retail\s+price|rs\.?|inr|rupees)\b",
+        " ",
+        text,
+        flags=re.I,
     )
 
-    has_number = any(
-        character.isdigit()
-        for character in text
-    )
+    cleaned = cleaned.replace("₹", " ")
 
-    return has_currency and has_number
+    # A price must contain a numeric value.
+    match = re.search(r"(?<![\d.])\d+(?:[.,]\d{1,2})?(?![\d.])", cleaned)
+
+    if not match:
+        return False
+
+    try:
+        amount = Decimal(match.group(0).replace(",", ""))
+    except InvalidOperation:
+        return False
+
+    return amount >= Decimal("0")
 
 
 def parse_quantity(value: str) -> Optional[Tuple[Decimal, str]]:
@@ -153,7 +164,8 @@ def parse_unit_price(value: str) -> Optional[Tuple[Decimal, str]]:
         return None
 
     unit_match = re.search(
-        r"/\s*(mg|g|kg|ml|l|cm|mm|m|number|no\.?|piece|pieces|unit|units)\b",
+        r"(?:/|per)\s*"
+        r"(mg|g|kg|ml|l|cm|mm|m|number|no\.?|piece|pieces|unit|units)\b",
         text,
     )
 
@@ -671,25 +683,31 @@ def run_compliance(ai: AIResult) -> ComplianceResult:
     # -----------------------------------------------------
 
     if quantity:
+        quantity_value = quantity.value
+
         add_issue(
             issues,
             "Rule 11 / Rule 22",
-            "physical_quantity",
-            "REVIEW",
+            "physical_verification",
+            "INFO",
             (
-                "Declared quantity was detected, but an image "
-                "cannot verify actual physical quantity or "
-                "maximum permissible error. Physical measurement "
-                "is required for definitive verification."
+                f"Declared net quantity {quantity_value} was "
+                "successfully detected from the label. "
+                "This image-based inspection cannot verify the "
+                "actual physical quantity inside the package or "
+                "the applicable maximum permissible error. "
+                "Physical measurement is required for definitive "
+                "Rule 11 / Rule 22 verification."
             ),
         )
-        review += 1
+
 
     # -----------------------------------------------------
     # AI ambiguities
     #
     # Category ambiguity is informational.
     # Country-of-origin ambiguity is handled by applicability.
+    # Product-name ambiguity is reconciled conservatively.
     # -----------------------------------------------------
 
     for ambiguity in ai.ambiguities:
@@ -709,6 +727,91 @@ def run_compliance(ai: AIResult) -> ComplianceResult:
             if not origin_is_applicable(context):
                 continue
 
+        # -------------------------------------------------
+        # Product-name reconciliation
+        #
+        # Example:
+        #
+        #   Almonds (100%)
+        #   100% Natural Californian Almonds
+        #
+        # These describe the same underlying commodity.
+        #
+        # A genuine conflict such as:
+        #
+        #   Almonds
+        #   Cashews
+        #
+        # remains REVIEW.
+        # -------------------------------------------------
+
+        if "product name" in ambiguity_text:
+            candidates = re.findall(
+                r"""['"]([^'"]+)['"]""",
+                str(ambiguity),
+            )
+
+            if len(candidates) >= 2:
+                ignored_words = {
+                    "natural",
+                    "pure",
+                    "premium",
+                    "fresh",
+                    "original",
+                    "authentic",
+                    "quality",
+                    "best",
+                    "select",
+                    "selected",
+                    "californian",
+                    "california",
+                }
+
+                normalized = []
+
+                for candidate in candidates[:2]:
+                    name = str(candidate).lower()
+
+                    # Remove percentages such as 100%.
+                    name = re.sub(
+                        r"\d+(?:\.\d+)?\s*%",
+                        " ",
+                        name,
+                    )
+
+                    # Remove punctuation.
+                    name = re.sub(
+                        r"[^a-z0-9\s]",
+                        " ",
+                        name,
+                    )
+
+                    tokens = {
+                        token
+                        for token in name.split()
+                        if token
+                        and len(token) > 1
+                        and token not in ignored_words
+                        and not token.isdigit()
+                    }
+
+                    normalized.append(tokens)
+
+                first_tokens = normalized[0]
+                second_tokens = normalized[1]
+
+                compatible = (
+                    bool(first_tokens)
+                    and bool(second_tokens)
+                    and (
+                        first_tokens.issubset(second_tokens)
+                        or second_tokens.issubset(first_tokens)
+                    )
+                )
+
+                if compatible:
+                    continue
+
         add_issue(
             issues,
             "AI REVIEW",
@@ -719,7 +822,8 @@ def run_compliance(ai: AIResult) -> ComplianceResult:
         review += 1
 
     # -----------------------------------------------------
-    # Final result
+
+# Final result
     # -----------------------------------------------------
 
     total = passed + failed + review
@@ -741,3 +845,5 @@ def run_compliance(ai: AIResult) -> ComplianceResult:
         review=review,
         issues=issues,
     )
+
+

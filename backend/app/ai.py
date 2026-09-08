@@ -50,7 +50,50 @@ Important:
 - Distinguish manufacturing dates from expiry/best-before dates.
 - Return only information supported by the OCR.
 
+CONSUMER CARE EXTRACTION:
+- Treat "Customer Care", "Consumer Care", "Consumer Complaints",
+  "Consumer Contact", "Helpline", "Toll Free", "Contact Us",
+  "Customer Service" and similar label wording as strong consumer-care signals.
+- A nearby telephone number, email address or website may be part of
+  the consumer-care declaration when it appears with such a label.
+- Preserve the complete useful contact declaration as evidence.
+- Do not classify an unrelated phone number as consumer care merely
+  because a phone number exists.
+
+UNIT SALE PRICE EXTRACTION:
+- Recognize formats such as "₹1.50 per g", "Rs. 1.50 per g",
+  "1.50 per g", "₹1.50/g", "1.50/g", "₹2 per kg" and similar forms.
+- Treat "/" and "per" as equivalent separators.
+- Preserve the numeric price and the declared unit.
+- NEVER infer country of origin from a manufacturer, packer, importer or address.
+- Only return country_of_origin when the OCR explicitly contains an origin declaration such as "Country of Origin", "Made in", "Product of", or equivalent wording.
+- If country of origin is not explicitly declared in the OCR, return null.
+- Do not turn missing information into the string "None", "N/A", "NA", "Not applicable", "Unknown", or "Not detected".
+- Use JSON null for missing scalar values and [] for missing lists.
+- For dimensions, return null when no dimensional declaration is actually present.
+
 Return valid JSON matching the requested structure.
+
+CRITICAL OUTPUT REQUIREMENT:
+You MUST ALWAYS return ALL five top-level keys:
+1. product
+2. declarations
+3. country_of_origin
+4. label_type
+5. ambiguities
+
+Never omit any of these keys.
+
+If country_of_origin is not explicitly present in the OCR, return:
+"country_of_origin": null
+
+If label_type cannot be determined, return:
+"label_type": null
+
+If there are no ambiguities, return:
+"ambiguities": []
+
+The keys must still be present even when their values are null or empty.
 """
 
 
@@ -195,3 +238,7 @@ def process_ocr(ocr_text: str) -> AIResult:
         label_type=data.get("label_type"),
         ambiguities=data.get("ambiguities") or [],
     )
+
+
+
+

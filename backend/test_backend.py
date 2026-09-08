@@ -50,7 +50,7 @@ def test_quantity():
 
 def test_price():
     assert looks_like_price("₹40")
-    assert not looks_like_price("40")
+    assert looks_like_price("299.00")
 
 
 def test_unit_price():
@@ -62,6 +62,8 @@ def test_unit_price():
     assert price == Decimal("0.20")
     assert unit == "ml"
     assert expected_unit_for_quantity("200 ml") == "ml"
+    assert parse_unit_price("₹1.50 per g") == (Decimal("1.50"), "g")
+    assert parse_unit_price("₹2.00/kg") == (Decimal("2.00"), "kg")
 
 
 def test_category_ambiguity():
@@ -129,3 +131,4 @@ if __name__ == "__main__":
     test_complete_pipeline_does_not_fail()
 
     print("ALL REGRESSION TESTS: PASS")
+

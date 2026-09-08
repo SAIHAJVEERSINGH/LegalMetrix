@@ -16,8 +16,8 @@ def get_ocr():
     if _ocr is None:
         _ocr = PaddleOCR(
             lang="en",
-            device="cpu",
-            enable_mkldnn=False,
+            device="gpu:0",
+            
             use_doc_orientation_classify=False,
             use_doc_unwarping=False,
             use_textline_orientation=False,
@@ -49,3 +49,4 @@ def extract_text(image_path: str) -> str:
                 texts.append(str(text).strip())
 
     return "\n".join(texts)
+

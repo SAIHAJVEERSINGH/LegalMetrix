@@ -1,8 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import "./App.css";
 
-const API_URL =
-  import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
+const API_URL ="http://127.0.0.1:8000";
 const MAX_IMAGES = 6;
 
 function StatusBadge({ status }) {
@@ -360,11 +359,11 @@ function App() {
 
           <div className="hero-pipeline">
             <span>01 OCR</span>
-            <i>â†’</i>
+            <i>&#8594;</i>
             <span>02 AI INTERPRETATION</span>
-            <i>â†’</i>
+            <i>&#8594;</i>
             <span>03 RULE VALIDATION</span>
-            <i>â†’</i>
+            <i>&#8594;</i>
             <span>04 REPORT</span>
           </div>
         </section>
@@ -408,7 +407,7 @@ function App() {
                   <div className="corner top-right" />
                   <div className="corner bottom-left" />
                   <div className="corner bottom-right" />
-                  <span>â†‘</span>
+                  <span>&#8593;</span>
                 </div>
 
                 <h3>Upload product imagery</h3>
@@ -419,7 +418,7 @@ function App() {
                   or click to browse
                 </p>
 
-                <small>JPG Â· PNG Â· WEBP Â· UP TO 6 IMAGES</small>
+                <small>JPG &#183; PNG &#183; WEBP &#183; UP TO 6 IMAGES</small>
               </div>
             ) : (
               <div className="preview-area">
@@ -441,7 +440,7 @@ function App() {
                           onClick={() => removeFile(index)}
                           title="Remove image"
                         >
-                          Ã—
+                          &#215;
                         </button>
                       </div>
 
@@ -467,7 +466,7 @@ function App() {
                     className="secondary-button"
                     onClick={openCamera}
                   >
-                    <span>â—Ž</span>
+                    <span>&#9678;</span>
                     CAPTURE WITH CAMERA
                   </button>
 
@@ -492,7 +491,7 @@ function App() {
                     openCamera();
                   }}
                 >
-                  <span>â—Ž</span>
+                  <span>&#9678;</span>
                   TAKE PHOTO WITH CAMERA
                 </button>
               </div>
@@ -516,7 +515,7 @@ function App() {
               </span>
 
               <strong>
-                {scanning ? <span className="spinner" /> : "â†’"}
+                {scanning ? <span className="spinner" /> : "\u2192"}
               </strong>
             </button>
 
@@ -569,9 +568,9 @@ function App() {
 
                 <div className="waiting-flow">
                   <span>OCR</span>
-                  <i>â†’</i>
+                  <i>&#8594;</i>
                   <span>AI</span>
-                  <i>â†’</i>
+                  <i>&#8594;</i>
                   <span>RULES</span>
                 </div>
               </div>
@@ -599,8 +598,8 @@ function App() {
                 <h2>Reading your label</h2>
 
                 <p>
-                  Extracting text â†’ interpreting declarations
-                  â†’ validating compliance
+                  Extracting text &#8594; interpreting declarations
+                  &#8594; validating compliance
                 </p>
 
                 <div className="progress-track">
@@ -736,9 +735,9 @@ function App() {
                             ).toLowerCase()}`}
                           >
                             {issue.status === "PASS"
-                              ? "âœ“"
+                              ? "\u2713"
                               : issue.status === "FAIL"
-                                ? "Ã—"
+                                ? "\u00D7"
                                 : "!"}
                           </div>
 
@@ -909,7 +908,7 @@ function App() {
               </div>
             </div>
 
-            <div className="architecture-arrow">â†’</div>
+            <div className="architecture-arrow">&#8594;</div>
 
             <div className="architecture-step">
               <b>02</b>
@@ -919,7 +918,7 @@ function App() {
               </div>
             </div>
 
-            <div className="architecture-arrow">â†’</div>
+            <div className="architecture-arrow">&#8594;</div>
 
             <div className="architecture-step">
               <b>03</b>
@@ -929,7 +928,7 @@ function App() {
               </div>
             </div>
 
-            <div className="architecture-arrow">â†’</div>
+            <div className="architecture-arrow">&#8594;</div>
 
             <div className="architecture-step">
               <b>04</b>
@@ -939,7 +938,7 @@ function App() {
               </div>
             </div>
 
-            <div className="architecture-arrow">â†’</div>
+            <div className="architecture-arrow">&#8594;</div>
 
             <div className="architecture-step">
               <b>05</b>
@@ -955,7 +954,7 @@ function App() {
 
 
         <div className="disclaimer">
-          SCREENING TOOL Â· RESULTS ARE BASED ON DETECTED LABEL INFORMATION
+          SCREENING TOOL &#183; RESULTS ARE BASED ON DETECTED LABEL INFORMATION
           AND SHOULD BE REVIEWED BY AN APPROPRIATE AUTHORITY.
         </div>
 
@@ -984,7 +983,7 @@ function App() {
                 <strong>Capture product label</strong>
               </div>
 
-              <button onClick={closeCamera}>Ã—</button>
+              <button onClick={closeCamera}>&#215;</button>
             </div>
 
             <div className="camera-view">

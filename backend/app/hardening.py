@@ -29,21 +29,185 @@ def _norm_value(text: str) -> str:
     return value
 
 
+NULL_LIKE_VALUES = {
+    "",
+    "none",
+    "null",
+    "n/a",
+    "na",
+    "not applicable",
+    "not available",
+    "not detected",
+    "unknown",
+}
+
+
+def _clean_optional_value(value):
+    """
+    Convert model placeholders into actual missing values.
+    """
+    if value is None:
+        return None
+
+    text = str(value).strip()
+
+    if text.lower() in NULL_LIKE_VALUES:
+        return None
+
+    return text
+
+
+def _extract_consumer_care_from_ocr(ocr_text: str):
+    """
+    Deterministic OCR-backed consumer-care fallback.
+
+    This does not invent contact information.
+    It only creates a declaration when OCR contains a strong
+    consumer-care/contact anchor and captures nearby OCR text.
+    """
+    if not ocr_text:
+        return None
+
+    patterns = [
+        r"customer\s+care",
+        r"consumer\s+care",
+        r"consumer\s+complaints?",
+        r"consumer\s+contact",
+        r"customer\s+service",
+        r"helpline",
+        r"toll[\s-]*free",
+        r"contact\s+us",
+    ]
+
+    for pattern in patterns:
+        match = re.search(pattern, ocr_text, re.I)
+        if not match:
+            continue
+
+        start = max(0, match.start() - 80)
+        end = min(len(ocr_text), match.end() + 220)
+
+        evidence = re.sub(
+            r"\s+",
+            " ",
+            ocr_text[start:end]
+        ).strip()
+
+        if evidence:
+            return Declaration(
+                field="consumer_care",
+                value=evidence,
+                confidence=0.90,
+                evidence=[evidence],
+            )
+
+    return None
+
+
+def _unit_sale_price_is_structurally_valid(value: str) -> bool:
+    """
+    Validate common unit-sale-price forms without making a legal decision.
+    """
+    if not value:
+        return False
+
+    text = str(value).strip().lower()
+
+    price_match = re.search(
+        r"(?:₹|rs\.?|inr|rupees)?\s*"
+        r"\d+(?:[.,]\d+)?",
+        text,
+        re.I,
+    )
+
+    if not price_match:
+        return False
+
+    unit_match = re.search(
+        r"(?:/|per)\s*"
+        r"(mg|g|kg|ml|l|cm|mm|m|number|no\.?|piece|pieces|unit|units)\b",
+        text,
+        re.I,
+    )
+
+    return bool(unit_match)
+
+
+def _is_redundant_unit_price_ambiguity(message: str) -> bool:
+    """
+    AI sometimes reports a generic Unit Sale Price ambiguity even when
+    the deterministic parser has already established a valid declaration.
+    """
+    text = _norm(message)
+    return (
+        "unit sale price" in text
+        or "unit_sale_price" in text
+    )
+
+
+def _explicit_country_of_origin(ocr_text: str) -> bool:
+    """
+    Country of origin is accepted only when the OCR contains
+    explicit origin wording.
+
+    A manufacturer/importer address containing a country name
+    is NOT sufficient evidence of country of origin.
+    """
+    if not ocr_text:
+        return False
+
+    patterns = [
+        r"\bcountry\s+of\s+origin\b",
+        r"\bmade\s+in\b",
+        r"\bproduct\s+of\b",
+        r"\bcountry\s*:\s*[a-z]",
+        r"\borigin\s*:\s*[a-z]",
+    ]
+
+    return any(
+        re.search(pattern, ocr_text, re.I)
+        for pattern in patterns
+    )
+
+
 # ---------------------------------------------------------
 # Evidence validation
 # ---------------------------------------------------------
 
+def _compact(text: str) -> str:
+    """
+    Remove formatting-only differences while preserving the
+    actual alphanumeric evidence content.
+    """
+    return re.sub(r"[^a-z0-9]+", "", str(text or "").lower())
+
+
 def _evidence_supported(evidence: str, ocr_text: str) -> bool:
     """
-    Evidence must actually occur in the OCR text.
+    Evidence must be supported by OCR.
 
-    We use normalized whitespace/case so harmless OCR spacing
-    differences do not create false reviews.
+    Matching tolerates harmless differences in:
+      - case
+      - whitespace
+      - punctuation
+      - separators such as ':' '/' '-'
+
+    We still require the complete compact evidence string to
+    occur in the compact OCR text.
     """
     if not evidence or not ocr_text:
         return False
 
-    return _norm(evidence) in _norm(ocr_text)
+    normalized_evidence = _norm(evidence)
+    normalized_ocr = _norm(ocr_text)
+
+    if normalized_evidence in normalized_ocr:
+        return True
+
+    compact_evidence = _compact(evidence)
+    compact_ocr = _compact(ocr_text)
+
+    return bool(compact_evidence) and compact_evidence in compact_ocr
 
 
 # ---------------------------------------------------------
@@ -295,14 +459,34 @@ def harden_ai_result(
 
         grouped.setdefault(field, []).append(declaration)
 
+    # Deterministic consumer-care fallback.
+    # Only runs when Groq did not already provide the field.
+    consumer_care_fields = {
+        "consumer_care",
+        "consumer_care_information",
+        "customer_care",
+        "consumer_complaint_contact",
+        "consumer_contact",
+    }
+
+    if not any(field in grouped for field in consumer_care_fields):
+        fallback_consumer_care = _extract_consumer_care_from_ocr(ocr_text)
+
+        if fallback_consumer_care is not None:
+            grouped.setdefault(
+                "consumer_care",
+                []
+            ).append(fallback_consumer_care)
+
     merged: List[Declaration] = []
     ambiguities = list(ai.ambiguities or [])
 
     for field, declarations in grouped.items():
         values = [
-            str(item.value).strip()
+            cleaned
             for item in declarations
-            if item.value is not None and str(item.value).strip()
+            for cleaned in [_clean_optional_value(item.value)]
+            if cleaned is not None
         ]
 
         normalized_values = {
@@ -317,10 +501,21 @@ def harden_ai_result(
                 + " | ".join(values)
             )
 
+        valid_declarations = [
+            item
+            for item in declarations
+            if _clean_optional_value(item.value) is not None
+        ]
+
+        if not valid_declarations:
+            continue
+
         best = max(
-            declarations,
+            valid_declarations,
             key=lambda item: float(item.confidence or 0.0),
         )
+
+        best_value = _clean_optional_value(best.value)
 
         evidence: List[str] = []
 
@@ -339,7 +534,7 @@ def harden_ai_result(
         merged.append(
             Declaration(
                 field=field,
-                value=best.value,
+                value=best_value,
                 confidence=confidence,
                 evidence=evidence,
             )
@@ -377,10 +572,52 @@ def harden_ai_result(
                         f"{best.value}"
                     )
 
+    # Country-of-origin inference protection.
+    if ai.country_of_origin and not _explicit_country_of_origin(ocr_text):
+        ambiguities.append(
+            "Country of origin was returned by AI without an explicit "
+            "origin declaration in the OCR; the inferred value was discarded."
+        )
+        country_of_origin = None
+    else:
+        country_of_origin = _clean_optional_value(ai.country_of_origin)
+
+    # Clean top-level label type as well.
+    label_type = _clean_optional_value(ai.label_type)
+
     # Cross-image consistency.
     ambiguities.extend(
         detect_cross_image_conflicts(ocr_text)
     )
+
+    # Remove a generic AI unit-sale-price ambiguity only when
+    # the deterministic declaration itself is structurally valid.
+    unit_price_declaration = next(
+        (
+            item
+            for item in merged
+            if str(item.field or "").strip().lower()
+            in {
+                "unit_sale_price",
+                "unit_price",
+                "unit sale price",
+                "sale_price_per_unit",
+            }
+        ),
+        None,
+    )
+
+    if (
+        unit_price_declaration is not None
+        and _unit_sale_price_is_structurally_valid(
+            unit_price_declaration.value
+        )
+    ):
+        ambiguities = [
+            item
+            for item in ambiguities
+            if not _is_redundant_unit_price_ambiguity(str(item))
+        ]
 
     # Deduplicate ambiguity messages while preserving order.
     unique_ambiguities = list(
@@ -394,7 +631,9 @@ def harden_ai_result(
     return AIResult(
         product=ai.product,
         declarations=merged,
-        country_of_origin=ai.country_of_origin,
-        label_type=ai.label_type,
+        country_of_origin=country_of_origin,
+        label_type=label_type,
         ambiguities=unique_ambiguities,
     )
+
+
